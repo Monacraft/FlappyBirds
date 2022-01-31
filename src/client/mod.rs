@@ -26,6 +26,11 @@ pub struct Player;
 #[derive(Component)]
 pub struct MainCamera;
 
+#[derive(Component)]
+pub struct Cloud;
+
+pub struct CloudTexture (Handle<TextureAtlas>);
+
 
 pub struct Score(pub i32);
 
@@ -36,6 +41,8 @@ impl Plugin for ClientPlugin {
         app.add_plugins(DefaultPlugins)
             .add_state(AppState::Waiting)
             .insert_resource(Score(-2))
+            .insert_resource(CloudTexture)
+            .insert_resource(ClearColor(Color::rgb(135./255., 206./255., 235./255.)))
             .add_system_set(SystemSet::on_enter(AppState::Waiting)
                 .with_system(init))
             .add_system_set(SystemSet::on_update(AppState::Playing)
@@ -43,12 +50,16 @@ impl Plugin for ClientPlugin {
                 .with_system(move_birds)
                 .with_system(animate_bird)
                 .with_system(collision)
+                .with_system(remove_pipes)
+                .with_system(remove_clouds)
                 .with_system(jump_input)
-                .with_system(update_score))
+                .with_system(update_score)
+            )
             .add_system_set(
                 SystemSet::on_update(AppState::Playing)
                     .with_run_criteria(FixedTimestep::step(0.65))
                     .with_system(generate_pipes)
+                    .with_system(spawn_clouds)
             )
             .add_system_set(SystemSet::on_update(AppState::Spectating)
                 .with_system(move_camera)
@@ -70,10 +81,15 @@ fn init(
     window.set_title("Flappy Birds".into());
     window.set_resizable(false);
 
-    // Load textures
+    // Load bird texture
     let texture_handle = asset_server.load("fuck-james.png");
     let texture_atlas = TextureAtlas::from_grid(texture_handle, Vec2::new(BIRD_TEX_WIDTH, BIRD_TEX_HEIGHT), 3, 1);
     let handle = texture_atlases.add(texture_atlas);
+
+    // Load cloud texture
+    let cloud_texture_handle = asset_server.load("clouds.png");
+    let cloud_texture_atlas = TextureAtlas::from_grid(cloud_texture_handle, Vec2::new(260./2., 260./3.), 2, 3);
+    commands.insert_resource(CloudTexture(texture_atlases.add(cloud_texture_atlas)));
 
     commands.spawn_bundle(OrthographicCameraBundle::new_2d()).insert(MainCamera {});
     commands.spawn_bundle(UiCameraBundle::default());
@@ -177,6 +193,51 @@ fn spawn_bird (
     }
 }
 
+pub fn spawn_clouds (
+    mut commands: Commands,
+    cloud_tex: Res<CloudTexture>,
+    query: Query<(&Transform, &Player)>
+) {
+    let mut rng = rand::thread_rng();
+
+    // Pos
+    let (Transform { translation: player_pos, .. }, _) =  query.single();
+    let y_pos = rng.gen_range((-SIZE_Y/2.)..(SIZE_Y/2.));
+    let x_var = rng.gen_range((-PIPE_TEX_WIDTH*PIPE_SCALE)..(PIPE_TEX_WIDTH*PIPE_SCALE));
+
+    // Scale
+    let scale = rng.gen_range((1.)..(2.)) as f32;
+
+    // Sprite selectionj
+    let sprite = rng.gen_range(0..6);
+
+    commands.spawn_bundle(
+        SpriteSheetBundle {
+            texture_atlas: cloud_tex.0.clone(),
+            transform: Transform {
+                translation: Vec3::new(player_pos.x + SIZE_X + x_var * 3., y_pos + x_var, 0.0),
+                scale: Vec3::new(scale, scale, 1.0),
+                ..Default::default()
+            },            
+            sprite: TextureAtlasSprite {
+                index: sprite,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    ).insert(Cloud {});
+}
+
+pub fn remove_clouds (
+    mut commands: Commands,
+    mut query: Query<(Entity, &Transform, &Cloud)>
+) {
+    for (entity, transform, _) in query.iter_mut() {
+        if transform.translation.x < -SIZE_X {
+            commands.entity(entity).despawn();
+        }
+    }
+}
 
 pub fn spawn_pipes (
     commands: &mut Commands,
